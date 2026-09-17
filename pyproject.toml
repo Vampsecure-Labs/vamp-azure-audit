@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vamp-azure-audit"
+version = "1.0"
+description = "Microsoft Azure security auditor for authorized assessments"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "VampSecure Studios", email = "contact@vampsecurestudios.com" }]
+keywords = ["security", "pentest", "audit", "cybersecurity", "vampsecure", "azure", "cloud", "iam", "microsoft"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+dependencies = [
+    "aiohttp>=3.9.0",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+vamp-azure-audit = "vamp_azure_audit:main"
+
+[project.urls]
+Homepage = "https://github.com/Vampsecure-Labs/vamp-azure-audit"
+Repository = "https://github.com/Vampsecure-Labs/vamp-azure-audit"
+
+[tool.setuptools]
+py-modules = ["vamp_azure_audit"]
