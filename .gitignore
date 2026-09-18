@@ -7,3 +7,4 @@ build/
 *.key
 *.pem
 *.asc
+CLAUDE.md
