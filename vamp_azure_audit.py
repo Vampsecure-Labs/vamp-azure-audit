@@ -28,7 +28,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 # ---------------------------------------------------------------------------
 # Constantes globales
 # ---------------------------------------------------------------------------
-VERSION = "1.0"
+VERSION = "1.1"
 AZURE_MGMT = "https://management.azure.com"
 AZURE_GRAPH = "https://graph.microsoft.com"
 AZURE_LOGIN = "https://login.microsoftonline.com"
@@ -553,7 +553,7 @@ async def audit_aks(
                 detalle=f"Plugin: {network_plugin} | Policy: None",
             ))
 
-        # AKS-004: Versión de Kubernetes desactualizada
+        # AKS-004: Versión de Kubernetes desactualizada (< 1.27 mínimo recomendado general)
         k8s_version = props.get("kubernetesVersion", "")
         if k8s_version:
             try:
@@ -578,6 +578,45 @@ async def audit_aks(
                     ))
             except (ValueError, IndexError):
                 pass
+
+        # AKS-005: Versión vulnerable al CVE-2026-33105 (escalada de privilegios AKS)
+        # Se usa 'currentKubernetesVersion' (la versión en ejecución real) cuando está disponible
+        k8s_version_actual = props.get("currentKubernetesVersion") or k8s_version
+        if k8s_version_actual and _version_vulnerable_cve_2026_33105(k8s_version_actual):
+            hallazgos.append(Hallazgo(
+                id="AZURE-AKS-005",
+                severidad="CRITICAL",
+                modulo="AKS",
+                recurso=nombre,
+                descripcion=(
+                    f"Versión de Kubernetes {k8s_version_actual} vulnerable a "
+                    "CVE-2026-33105 (escalada de privilegios en AKS)"
+                ),
+                remediacion=(
+                    "Actualizar el clúster AKS a la versión parcheada: "
+                    "≥1.29.15, ≥1.30.11 o ≥1.31.7 según la rama actual. "
+                    "Planificar ventana de mantenimiento urgente y probar en staging antes del despliegue."
+                ),
+                detalle=f"Cluster: {nombre} | Versión: {k8s_version_actual} | CVE: CVE-2026-33105",
+            ))
+
+        # AKS-006: API server expuesto públicamente (sin private cluster habilitado)
+        # Respuesta directa al advisory CVE-2026-33105 — el API server público amplía la
+        # superficie de ataque explotable con la vulnerabilidad de escalada
+        if not api_profile.get("enablePrivateCluster", False):
+            hallazgos.append(Hallazgo(
+                id="AZURE-AKS-006",
+                severidad="HIGH",
+                modulo="AKS",
+                recurso=nombre,
+                descripcion="API server de AKS expuesto públicamente (cluster no privado)",
+                remediacion=(
+                    "Migrar el clúster AKS a modo privado habilitando 'enablePrivateCluster = true', "
+                    "o restringir el acceso mediante 'authorizedIPRanges' en el perfil de acceso. "
+                    "Un API server público amplía la superficie de ataque explotable."
+                ),
+                detalle=f"Cluster: {nombre} | enablePrivateCluster: False",
+            ))
 
     return hallazgos
 
@@ -889,6 +928,46 @@ async def audit_keyvault(
                 detalle=f"KeyVault: {nombre} | publicNetworkAccess: Enabled | Sin reglas de red",
             ))
 
+        # KV-005: RBAC vs Access Policies — respuesta al CVE-2026-62825 Key Vault EoP
+        enable_rbac = props.get("enableRbacAuthorization", False)
+        access_policies = props.get("accessPolicies", [])
+
+        # KV-005 (MEDIUM): uso de Access Policies legacy en lugar de RBAC
+        if not enable_rbac and access_policies:
+            hallazgos.append(Hallazgo(
+                id="AZURE-KV-005",
+                severidad="MEDIUM",
+                modulo="KeyVault",
+                recurso=nombre,
+                descripcion="Key Vault usa Access Policies legacy en lugar de RBAC — más permisivas y sin soporte de condiciones",
+                remediacion=(
+                    "Migrar de Access Policies a autorización RBAC habilitando "
+                    "'enableRbacAuthorization = true'. Las Access Policies no soportan "
+                    "condiciones de acceso y son el vector del CVE-2026-62825. "
+                    "Usar 'az keyvault update --enable-rbac-authorization true'."
+                ),
+                detalle=(
+                    f"KeyVault: {nombre} | enableRbacAuthorization: False | "
+                    f"Access Policies configuradas: {len(access_policies)}"
+                ),
+            ))
+
+        # KV-005 (HIGH): vault accesible desde todas las redes (agravante del CVE-2026-62825)
+        if default_action == "Allow":
+            hallazgos.append(Hallazgo(
+                id="AZURE-KV-005",
+                severidad="HIGH",
+                modulo="KeyVault",
+                recurso=nombre,
+                descripcion="Key Vault accesible desde 'All networks' — sin restricción de red (contexto CVE-2026-62825)",
+                remediacion=(
+                    "Configurar 'networkAcls.defaultAction = Deny' y añadir solo las IPs "
+                    "o VNets autorizadas. Combinar con migración a RBAC para mitigar "
+                    "completamente el vector CVE-2026-62825."
+                ),
+                detalle=f"KeyVault: {nombre} | networkAcls.defaultAction: Allow",
+            ))
+
     return hallazgos
 
 
@@ -960,6 +1039,289 @@ async def audit_defender(
             ),
             detalle="securityContacts: vacío",
         ))
+
+    return hallazgos
+
+
+# ---------------------------------------------------------------------------
+# Helper: verificación de versión vulnerable CVE-2026-33105
+# ---------------------------------------------------------------------------
+def _version_vulnerable_cve_2026_33105(version: str) -> bool:
+    """Comprueba si una versión de Kubernetes es vulnerable al CVE-2026-33105.
+
+    Versiones mínimas seguras según el advisory oficial:
+        - Rama 1.29: ≥ 1.29.15
+        - Rama 1.30: ≥ 1.30.11
+        - Rama 1.31: ≥ 1.31.7
+        - Ramas < 1.29: EOL, sin parche disponible → se consideran vulnerables.
+        - Ramas > 1.31: no catalogadas en el advisory → se asumen no vulnerables.
+
+    Parámetros:
+        version -- Cadena de versión de Kubernetes (p.ej. '1.30.5').
+
+    Retorna True si la versión es vulnerable, False en caso contrario.
+    """
+    try:
+        partes = version.split(".")
+        mayor = int(partes[0])
+        menor = int(partes[1].split("-")[0]) if len(partes) > 1 else 0
+        patch = int(partes[2].split("-")[0]) if len(partes) > 2 else 0
+    except (ValueError, IndexError):
+        return False
+
+    # Solo aplica a Kubernetes v1.x
+    if mayor != 1:
+        return False
+
+    # Versiones anteriores a 1.29 — EOL, sin parche disponible
+    if menor < 29:
+        return True
+
+    # Parches mínimos seguros por rama
+    parches_seguros = {29: 15, 30: 11, 31: 7}
+
+    if menor in parches_seguros:
+        return patch < parches_seguros[menor]
+
+    # Ramas > 1.31 no catalogadas en el advisory → no se marcan como vulnerables
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Módulo Enterprise Applications y Conditional Access (Entra ID)
+# ---------------------------------------------------------------------------
+async def audit_ent(
+    session: aiohttp.ClientSession,
+    token_graph: Optional[str],
+    subscription_id: str,
+) -> List[Hallazgo]:
+    """Audita aplicaciones empresariales y Conditional Access de Entra ID.
+
+    Respuesta al CVE-2026-69836 (Entra ID RCE). Requiere token de Microsoft Graph
+    con scopes Policy.Read.All y Application.Read.All.
+
+    Comprobaciones:
+        AZURE-ENT-001 — Políticas de Conditional Access.
+        AZURE-ENT-002 — Enterprise Apps con permisos de escritura masiva.
+        AZURE-ENT-003 — Service Principals con credenciales expiradas o por expirar.
+    """
+    hallazgos: List[Hallazgo] = []
+
+    if not token_graph:
+        console.print(
+            "  [yellow]⚠ Sin token de Microsoft Graph — módulo ENT omitido "
+            "(requiere scopes Policy.Read.All y Application.Read.All)[/]"
+        )
+        return hallazgos
+
+    # -----------------------------------------------------------------
+    # ENT-001: Conditional Access Policies
+    # -----------------------------------------------------------------
+    url_ca = f"{AZURE_GRAPH}/v1.0/identity/conditionalAccess/policies"
+    politicas = await graph_get_pages(session, url_ca, token_graph)
+
+    # Separar por estado
+    politicas_activas = [p for p in politicas if p.get("state") == "enabled"]
+    politicas_deshabilitadas = [
+        p for p in politicas
+        if p.get("state") in ("disabled", "enabledForReportingButNotEnforced")
+    ]
+
+    if not politicas_activas:
+        # Sin ninguna política activa — máximo riesgo
+        hallazgos.append(Hallazgo(
+            id="AZURE-ENT-001",
+            severidad="CRITICAL",
+            modulo="EnterpriseApps",
+            recurso="identity/conditionalAccess/policies",
+            descripcion="Sin Conditional Access activo — todos los accesos sin MFA ni restricción de red",
+            remediacion=(
+                "Crear al menos una política de Conditional Access que exija MFA "
+                "para todos los usuarios. Revisar el advisory CVE-2026-69836 sobre "
+                "autenticación en Entra ID. Habilitar Named Locations para restringir "
+                "el acceso por red o país de origen."
+            ),
+            detalle=f"Políticas activas: 0 | Total en el tenant: {len(politicas)}",
+        ))
+    else:
+        # Verificar cobertura de 'All users' y 'All apps'
+        cubre_todos_usuarios = any(
+            "All" in p.get("conditions", {}).get("users", {}).get("includeUsers", [])
+            for p in politicas_activas
+        )
+        cubre_todas_apps = any(
+            "All" in p.get("conditions", {}).get("applications", {}).get("includeApplications", [])
+            for p in politicas_activas
+        )
+
+        if not cubre_todos_usuarios or not cubre_todas_apps:
+            hallazgos.append(Hallazgo(
+                id="AZURE-ENT-001",
+                severidad="HIGH",
+                modulo="EnterpriseApps",
+                recurso="identity/conditionalAccess/policies",
+                descripcion="Políticas de Conditional Access no cubren 'All users' o 'All apps'",
+                remediacion=(
+                    "Ampliar las políticas de Conditional Access para cubrir todos los "
+                    "usuarios y todas las aplicaciones. Usar exclusiones específicas en "
+                    "lugar de no incluir grupos enteros."
+                ),
+                detalle=(
+                    f"Políticas activas: {len(politicas_activas)} | "
+                    f"Cubre todos usuarios: {cubre_todos_usuarios} | "
+                    f"Cubre todas apps: {cubre_todas_apps}"
+                ),
+            ))
+
+        # Políticas en modo solo-reporte o deshabilitadas
+        if politicas_deshabilitadas:
+            nombres = ", ".join(
+                p.get("displayName", p.get("id", "?"))[:30]
+                for p in politicas_deshabilitadas[:5]
+            )
+            hallazgos.append(Hallazgo(
+                id="AZURE-ENT-001",
+                severidad="MEDIUM",
+                modulo="EnterpriseApps",
+                recurso="identity/conditionalAccess/policies",
+                descripcion=(
+                    f"Políticas de Conditional Access en estado deshabilitado o "
+                    f"solo-reporte ({len(politicas_deshabilitadas)})"
+                ),
+                remediacion=(
+                    "Activar las políticas en modo 'Report-only' o deshabilitadas. "
+                    "El modo report-only registra eventos pero no protege activamente. "
+                    "Habilitar tras validar que no bloquea usuarios legítimos."
+                ),
+                detalle=f"Políticas deshabilitadas/report-only: {nombres}",
+            ))
+
+    # -----------------------------------------------------------------
+    # ENT-002: Enterprise Apps con permisos excesivos de escritura masiva
+    # -----------------------------------------------------------------
+    PERMISOS_EXCESIVOS = {
+        "Directory.ReadWrite.All",
+        "Mail.ReadWrite",
+        "Files.ReadWrite.All",
+        "User.ReadWrite.All",
+        "RoleManagement.ReadWrite.Directory",
+    }
+
+    url_sp = (
+        f"{AZURE_GRAPH}/v1.0/servicePrincipals"
+        "?$select=displayName,appId,oauth2PermissionScopes,appRoles"
+    )
+    service_principals = await graph_get_pages(session, url_sp, token_graph)
+
+    for sp in service_principals:
+        nombre_sp = sp.get("displayName", sp.get("appId", "desconocido"))
+        permisos_encontrados: set = set()
+
+        # Revisar permisos delegados (oauth2PermissionScopes)
+        for scope in sp.get("oauth2PermissionScopes", []):
+            valor = scope.get("value", "")
+            if valor in PERMISOS_EXCESIVOS:
+                permisos_encontrados.add(valor)
+
+        # Revisar permisos de aplicación (appRoles)
+        for role in sp.get("appRoles", []):
+            valor = role.get("value", "")
+            if valor in PERMISOS_EXCESIVOS:
+                permisos_encontrados.add(valor)
+
+        if permisos_encontrados:
+            hallazgos.append(Hallazgo(
+                id="AZURE-ENT-002",
+                severidad="HIGH",
+                modulo="EnterpriseApps",
+                recurso=nombre_sp,
+                descripcion="Enterprise App con permisos de escritura masiva sobre el directorio o datos",
+                remediacion=(
+                    "Revisar si la aplicación necesita realmente estos permisos y reducirlos "
+                    "al mínimo indispensable. Sustituir permisos .ReadWrite.All por permisos "
+                    "específicos de menor alcance. Aplicar el principio de mínimo privilegio "
+                    "en todas las aplicaciones de Entra ID."
+                ),
+                detalle=f"App: {nombre_sp} | Permisos excesivos: {', '.join(sorted(permisos_encontrados))}",
+            ))
+
+    # -----------------------------------------------------------------
+    # ENT-003: Service Principals con credenciales expiradas o por expirar
+    # -----------------------------------------------------------------
+    ahora = datetime.datetime.utcnow()
+    limite_urgente = ahora + datetime.timedelta(days=30)
+
+    url_sp_creds = (
+        f"{AZURE_GRAPH}/v1.0/servicePrincipals"
+        "?$select=displayName,passwordCredentials,keyCredentials"
+    )
+    sps_creds = await graph_get_pages(session, url_sp_creds, token_graph)
+
+    for sp in sps_creds:
+        nombre_sp = sp.get("displayName", "desconocido")
+
+        # Combinar credenciales de contraseña y de certificado
+        todas_credenciales = (
+            [(c, "password") for c in sp.get("passwordCredentials", [])]
+            + [(c, "key") for c in sp.get("keyCredentials", [])]
+        )
+
+        for cred, tipo_cred in todas_credenciales:
+            end_dt_str = cred.get("endDateTime", "")
+            if not end_dt_str:
+                continue
+
+            try:
+                # Normalizar formato ISO 8601 (puede incluir 'Z' o '+00:00')
+                end_dt = datetime.datetime.fromisoformat(
+                    end_dt_str.replace("Z", "+00:00")
+                ).replace(tzinfo=None)
+            except (ValueError, AttributeError):
+                continue
+
+            hint = cred.get("displayName") or "sin-nombre"
+
+            if end_dt < ahora:
+                # Credencial ya expirada — el SP puede estar usando credenciales inválidas
+                hallazgos.append(Hallazgo(
+                    id="AZURE-ENT-003",
+                    severidad="HIGH",
+                    modulo="EnterpriseApps",
+                    recurso=nombre_sp,
+                    descripcion=f"Service Principal con credencial {tipo_cred} expirada aún registrada",
+                    remediacion=(
+                        "Rotar o eliminar la credencial expirada del Service Principal. "
+                        "Implementar un proceso de rotación automática. "
+                        "Revisar si el Service Principal sigue siendo necesario."
+                    ),
+                    detalle=(
+                        f"SP: {nombre_sp} | Credencial: {hint} | "
+                        f"Tipo: {tipo_cred} | Expiró: {end_dt.strftime('%Y-%m-%d')}"
+                    ),
+                ))
+            elif end_dt < limite_urgente:
+                # Credencial próxima a expirar — rotación urgente
+                dias_restantes = (end_dt - ahora).days
+                hallazgos.append(Hallazgo(
+                    id="AZURE-ENT-003",
+                    severidad="MEDIUM",
+                    modulo="EnterpriseApps",
+                    recurso=nombre_sp,
+                    descripcion=(
+                        f"Service Principal con credencial {tipo_cred} "
+                        f"que expira en {dias_restantes} día(s)"
+                    ),
+                    remediacion=(
+                        "Rotar la credencial del Service Principal antes de que expire. "
+                        "Implementar alertas automáticas de expiración. "
+                        "Considerar el uso de identidades gestionadas (Managed Identities) "
+                        "para eliminar la gestión manual de secretos."
+                    ),
+                    detalle=(
+                        f"SP: {nombre_sp} | Credencial: {hint} | "
+                        f"Tipo: {tipo_cred} | Expira: {end_dt.strftime('%Y-%m-%d')}"
+                    ),
+                ))
 
     return hallazgos
 
@@ -1407,10 +1769,11 @@ async def ejecutar_auditoria(args: argparse.Namespace) -> List[Hallazgo]:
             console.print(f"  [bold red]✗ Error obteniendo token Management: {e}[/]")
             sys.exit(1)
 
-        # Token para Graph API (opcional — solo si se ejecuta módulo IAM)
+        # Token para Graph API (opcional — requerido por módulos IAM y ENT)
         token_graph: Optional[str] = None
         modulo_iam = not args.modulos or "iam" in args.modulos
-        if modulo_iam:
+        modulo_ent = not args.modulos or "ent" in args.modulos
+        if modulo_iam or modulo_ent:
             try:
                 token_graph = await obtener_token(session, tenant, client_id, client_secret, SCOPE_GRAPH)
                 console.print("  [green]✓ Token Microsoft Graph obtenido[/]")
@@ -1428,6 +1791,7 @@ async def ejecutar_auditoria(args: argparse.Namespace) -> List[Hallazgo]:
             "nsg": ("Network Security Groups", audit_nsg),
             "keyvault": ("Key Vault", audit_keyvault),
             "defender": ("Microsoft Defender for Cloud", audit_defender),
+            "ent": ("Enterprise Apps & Conditional Access (Entra ID)", audit_ent),
         }
 
         modulos_a_ejecutar = args.modulos if args.modulos else list(modulos_disponibles.keys())
@@ -1444,6 +1808,9 @@ async def ejecutar_auditoria(args: argparse.Namespace) -> List[Hallazgo]:
             try:
                 if mod_id == "iam":
                     hallazgos_mod = await mod_func(session, token_mgmt, token_graph, subscription_id)
+                elif mod_id == "ent":
+                    # ENT solo requiere token de Graph y el subscription_id de contexto
+                    hallazgos_mod = await mod_func(session, token_graph, subscription_id)
                 elif mod_id in ("storage", "aks", "appservices", "nsg", "keyvault", "defender"):
                     hallazgos_mod = await mod_func(session, token_mgmt, subscription_id)
                 else:
@@ -1508,11 +1875,11 @@ def main() -> None:
     parser.add_argument(
         "--modulos", "-m",
         nargs="+",
-        choices=["iam", "storage", "aks", "appservices", "nsg", "keyvault", "defender"],
+        choices=["iam", "storage", "aks", "appservices", "nsg", "keyvault", "defender", "ent"],
         metavar="MODULO",
         help=(
             "Módulos a ejecutar (por defecto: todos). "
-            "Opciones: iam storage aks appservices nsg keyvault defender"
+            "Opciones: iam storage aks appservices nsg keyvault defender ent"
         ),
     )
 
@@ -1608,7 +1975,7 @@ def main() -> None:
                 "fecha_fin": fecha_fin.isoformat() + "Z",
                 "duracion_segundos": round(duracion, 2),
                 "grade": grade,
-                "modulos": args.modulos or ["iam", "storage", "aks", "appservices", "nsg", "keyvault", "defender"],
+                "modulos": args.modulos or ["iam", "storage", "aks", "appservices", "nsg", "keyvault", "defender", "ent"],
             },
             "resumen": {
                 "total": len(hallazgos),
