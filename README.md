@@ -1,3 +1,4 @@
+<!-- © VampSecure Studios — VampSecure Labs Security Research Division -->
 # vamp-azure-audit
 
 **Microsoft Azure Security Auditor — VampSecure Labs Security Research Division**
@@ -13,6 +14,8 @@ Herramienta CLI de auditoría de seguridad para entornos Microsoft Azure. Detect
 
 ```bash
 pip install vamp-azure-audit
+# o con Homebrew:
+brew install vampsecure-labs/labs/vamp-azure-audit
 ```
 
 O desde el repositorio:
@@ -159,7 +162,7 @@ vamp-azure-audit --output-html informe.html --output-json hallazgos.json
    ╚████╔╝ ██║  ██║██║ ╚═╝ ██║██║
     ╚═══╝  ╚═╝  ╚═╝╚═╝     ╚═╝╚═╝
 
-  vamp-azure-audit v1.0  —  Azure Security Auditor
+  vamp-azure-audit v1.1  —  Azure Security Auditor
   VampSecure Labs Security Research Division
 
 → Autenticando en Azure...
@@ -207,7 +210,7 @@ fi
 
 ## Licencia
 
-MIT License — Copyright © VampSecure Studios — VampSecure Labs Security Research Division
+AGPL-3.0 License — Copyright © VampSecure Studios — VampSecure Labs Security Research Division
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -218,3 +221,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ---
 
 © VampSecure Studios — VampSecure Labs Security Research Division
+
+## Versión
+v1.1 — VampSecure Labs Security Research Division
