@@ -14,10 +14,8 @@ Cubre la lógica de análisis de recursos Azure sin hacer llamadas HTTP reales:
 import asyncio
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -25,12 +23,10 @@ from vamp_azure_audit import (
     PUERTOS_CRITICOS,
     ROLE_CONTRIBUTOR,
     ROLE_OWNER,
-    ROLE_USER_ACCESS_ADMIN,
     Hallazgo,
     audit_iam,
     audit_storage,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers para tests async
@@ -41,7 +37,7 @@ def run_async(coro):
     return asyncio.run(coro)
 
 
-def _make_mock_session(responses: Dict[str, Any]) -> MagicMock:
+def _make_mock_session(responses: dict[str, Any]) -> MagicMock:
     """Crea una sesión aiohttp mockeada que devuelve respuestas predefinidas."""
     session = MagicMock()
 

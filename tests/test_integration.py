@@ -7,19 +7,14 @@ No requiere credenciales ni conexión a Azure.
 """
 
 import asyncio
-import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from vamp_azure_audit import (
     ROLE_OWNER,
-    Hallazgo,
     audit_iam,
     audit_storage,
     az_get_pages,
@@ -35,7 +30,7 @@ def run_async(coro):
 # Helper: mock de sesión aiohttp que devuelve valor fijo
 # ---------------------------------------------------------------------------
 
-def _mock_session_con_valor(valor: List[Dict]) -> MagicMock:
+def _mock_session_con_valor(valor: list[dict]) -> MagicMock:
     """
     Crea una sesión aiohttp mockeada cuyo GET devuelve {'value': valor}.
     Simula una respuesta paginada de la Management API de Azure.

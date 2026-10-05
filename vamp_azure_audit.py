@@ -7,23 +7,23 @@ Key Vault y Microsoft Defender for Cloud.
 
 Uso exclusivo en entornos donde se dispone de autorización explícita.
 """
+from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime
 import json
 import os
 import sys
-import datetime
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Tuple
+from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
-from rich.console import Console
-from rich.table import Table
 from rich import box
+from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 # ---------------------------------------------------------------------------
 # Constantes globales
@@ -39,7 +39,7 @@ SCOPE_MGMT = "https://management.azure.com/.default"
 SCOPE_GRAPH = "https://graph.microsoft.com/.default"
 
 # Puertos considerados críticos si se exponen a Internet
-PUERTOS_CRITICOS: Dict[str, str] = {
+PUERTOS_CRITICOS: dict[str, str] = {
     "22": "SSH",
     "23": "Telnet",
     "25": "SMTP",
@@ -69,7 +69,7 @@ ROLE_CONTRIBUTOR = "b24988ac-6180-42a0-ab88-20f7382dd24c"
 ROLE_USER_ACCESS_ADMIN = "18d7d88d-d35e-4fb5-a5c3-7773c20a72d9"
 
 # Servicios de Defender for Cloud a verificar
-SERVICIOS_DEFENDER: Dict[str, str] = {
+SERVICIOS_DEFENDER: dict[str, str] = {
     "VirtualMachines": "Máquinas Virtuales",
     "SqlServers": "SQL Servers",
     "AppServices": "App Services",
@@ -102,7 +102,7 @@ class Hallazgo:
 # ---------------------------------------------------------------------------
 # Colores por severidad para Rich
 # ---------------------------------------------------------------------------
-COLORES_SEVERIDAD: Dict[str, str] = {
+COLORES_SEVERIDAD: dict[str, str] = {
     "CRITICAL": "bold red",
     "HIGH": "red",
     "MEDIUM": "yellow",
@@ -110,7 +110,7 @@ COLORES_SEVERIDAD: Dict[str, str] = {
     "INFO": "white",
 }
 
-ICONOS_SEVERIDAD: Dict[str, str] = {
+ICONOS_SEVERIDAD: dict[str, str] = {
     "CRITICAL": "🔴",
     "HIGH": "🟠",
     "MEDIUM": "🟡",
@@ -165,7 +165,7 @@ async def az_get_pages(
     url: str,
     token: str,
     api_version: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Consulta paginada de la API de Azure Management.
 
     Sigue automáticamente los enlaces 'nextLink' para recopilar todos
@@ -182,7 +182,7 @@ async def az_get_pages(
     headers = {"Authorization": f"Bearer {token}"}
     sep = "&" if "?" in url else "?"
     full_url = f"{url}{sep}api-version={api_version}"
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
 
     while full_url:
         async with session.get(full_url, headers=headers) as resp:
@@ -211,7 +211,7 @@ async def az_get_single(
     url: str,
     token: str,
     api_version: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Obtiene un único recurso de la Management API.
 
     Retorna el JSON de la respuesta o None si no existe o hay error.
@@ -232,7 +232,7 @@ async def graph_get_pages(
     session: aiohttp.ClientSession,
     url: str,
     token: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Consulta paginada de Microsoft Graph API.
 
     Parámetros:
@@ -246,8 +246,8 @@ async def graph_get_pages(
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    items: List[Dict[str, Any]] = []
-    full_url: Optional[str] = url
+    items: list[dict[str, Any]] = []
+    full_url: str | None = url
 
     while full_url:
         async with session.get(full_url, headers=headers) as resp:
@@ -269,9 +269,9 @@ async def graph_get_pages(
 async def audit_iam(
     session: aiohttp.ClientSession,
     token_mgmt: str,
-    token_graph: Optional[str],
+    token_graph: str | None,
     subscription_id: str,
-) -> List[Hallazgo]:
+) -> list[Hallazgo]:
     """Audita asignaciones de roles y usuarios invitados en el plano IAM.
 
     Comprobaciones:
@@ -279,7 +279,7 @@ async def audit_iam(
         AZURE-IAM-002 — Service Principal con Owner a nivel de suscripción.
         AZURE-IAM-003 — Usuario invitado (Guest) con roles privilegiados.
     """
-    hallazgos: List[Hallazgo] = []
+    hallazgos: list[Hallazgo] = []
     base_url = f"{AZURE_MGMT}/subscriptions/{subscription_id}/providers/Microsoft.Authorization/roleAssignments"
 
     assignments = await az_get_pages(session, base_url, token_mgmt, "2022-04-01")
@@ -383,7 +383,7 @@ async def audit_storage(
     session: aiohttp.ClientSession,
     token_mgmt: str,
     subscription_id: str,
-) -> List[Hallazgo]:
+) -> list[Hallazgo]:
     """Audita Storage Accounts en busca de misconfiguraciones de seguridad.
 
     Comprobaciones:
@@ -392,7 +392,7 @@ async def audit_storage(
         AZURE-STOR-003 — Sin restricciones de red (acceso desde cualquier IP).
         AZURE-STOR-004 — Versión TLS mínima inferior a 1.2.
     """
-    hallazgos: List[Hallazgo] = []
+    hallazgos: list[Hallazgo] = []
     url = (
         f"{AZURE_MGMT}/subscriptions/{subscription_id}"
         "/providers/Microsoft.Storage/storageAccounts"
@@ -479,7 +479,7 @@ async def audit_aks(
     session: aiohttp.ClientSession,
     token_mgmt: str,
     subscription_id: str,
-) -> List[Hallazgo]:
+) -> list[Hallazgo]:
     """Audita clústeres AKS en busca de misconfiguraciones de seguridad.
 
     Comprobaciones:
@@ -488,7 +488,7 @@ async def audit_aks(
         AZURE-AKS-003 — Sin NetworkPolicy configurada.
         AZURE-AKS-004 — Versión de Kubernetes desactualizada (< 1.27).
     """
-    hallazgos: List[Hallazgo] = []
+    hallazgos: list[Hallazgo] = []
     url = (
         f"{AZURE_MGMT}/subscriptions/{subscription_id}"
         "/providers/Microsoft.ContainerService/managedClusters"
@@ -628,7 +628,7 @@ async def audit_appservices(
     session: aiohttp.ClientSession,
     token_mgmt: str,
     subscription_id: str,
-) -> List[Hallazgo]:
+) -> list[Hallazgo]:
     """Audita Azure App Services en busca de misconfiguraciones.
 
     Comprobaciones:
@@ -637,7 +637,7 @@ async def audit_appservices(
         AZURE-APP-003 — TLS mínimo inferior a 1.2 en configuración web.
         AZURE-APP-004 — FTP sin cifrar habilitado (AllAllowed).
     """
-    hallazgos: List[Hallazgo] = []
+    hallazgos: list[Hallazgo] = []
     url = (
         f"{AZURE_MGMT}/subscriptions/{subscription_id}"
         "/providers/Microsoft.Web/sites"
@@ -730,14 +730,14 @@ async def audit_nsg(
     session: aiohttp.ClientSession,
     token_mgmt: str,
     subscription_id: str,
-) -> List[Hallazgo]:
+) -> list[Hallazgo]:
     """Audita Network Security Groups en busca de reglas peligrosas.
 
     Comprobaciones:
         AZURE-NSG-001 — Puertos críticos expuestos a Internet (0.0.0.0/0).
         AZURE-NSG-002 — Regla que permite todo el tráfico entrante de Internet.
     """
-    hallazgos: List[Hallazgo] = []
+    hallazgos: list[Hallazgo] = []
     url = (
         f"{AZURE_MGMT}/subscriptions/{subscription_id}"
         "/providers/Microsoft.Network/networkSecurityGroups"
@@ -780,7 +780,7 @@ async def audit_nsg(
                     severidad="CRITICAL",
                     modulo="NSG",
                     recurso=f"{nombre_nsg}/{nombre_regla}",
-                    descripcion=f"Regla NSG permite TODO el tráfico entrante de Internet",
+                    descripcion="Regla NSG permite TODO el tráfico entrante de Internet",
                     remediacion=(
                         "Eliminar o restringir la regla que abre todos los puertos. "
                         "Aplicar reglas específicas para los servicios necesarios y "
@@ -838,7 +838,7 @@ async def audit_keyvault(
     session: aiohttp.ClientSession,
     token_mgmt: str,
     subscription_id: str,
-) -> List[Hallazgo]:
+) -> list[Hallazgo]:
     """Audita Azure Key Vaults en busca de misconfiguraciones.
 
     Comprobaciones:
@@ -847,7 +847,7 @@ async def audit_keyvault(
         AZURE-KV-003 — Key Vault accesible desde cualquier red.
         AZURE-KV-004 — Acceso de red público habilitado sin restricciones.
     """
-    hallazgos: List[Hallazgo] = []
+    hallazgos: list[Hallazgo] = []
     url = (
         f"{AZURE_MGMT}/subscriptions/{subscription_id}"
         "/providers/Microsoft.KeyVault/vaults"
@@ -978,14 +978,14 @@ async def audit_defender(
     session: aiohttp.ClientSession,
     token_mgmt: str,
     subscription_id: str,
-) -> List[Hallazgo]:
+) -> list[Hallazgo]:
     """Audita la configuración de Microsoft Defender for Cloud.
 
     Comprobaciones:
         AZURE-DEF-001 — Defender no activo para un tipo de servicio.
         AZURE-DEF-002 — Sin contacto de seguridad configurado.
     """
-    hallazgos: List[Hallazgo] = []
+    hallazgos: list[Hallazgo] = []
 
     # Obtener pricings de Defender
     url_pricing = (
@@ -994,7 +994,7 @@ async def audit_defender(
     )
     pricings = await az_get_pages(session, url_pricing, token_mgmt, "2024-01-01")
 
-    pricings_dict: Dict[str, str] = {}
+    pricings_dict: dict[str, str] = {}
     for p in pricings:
         nombre_svc = p.get("name", "")
         props = p.get("properties", {})
@@ -1092,9 +1092,9 @@ def _version_vulnerable_cve_2026_33105(version: str) -> bool:
 # ---------------------------------------------------------------------------
 async def audit_ent(
     session: aiohttp.ClientSession,
-    token_graph: Optional[str],
+    token_graph: str | None,
     subscription_id: str,
-) -> List[Hallazgo]:
+) -> list[Hallazgo]:
     """Audita aplicaciones empresariales y Conditional Access de Entra ID.
 
     Respuesta al CVE-2026-69836 (Entra ID RCE). Requiere token de Microsoft Graph
@@ -1105,7 +1105,7 @@ async def audit_ent(
         AZURE-ENT-002 — Enterprise Apps con permisos de escritura masiva.
         AZURE-ENT-003 — Service Principals con credenciales expiradas o por expirar.
     """
-    hallazgos: List[Hallazgo] = []
+    hallazgos: list[Hallazgo] = []
 
     if not token_graph:
         console.print(
@@ -1329,7 +1329,7 @@ async def audit_ent(
 # ---------------------------------------------------------------------------
 # Cálculo de puntuación / grade
 # ---------------------------------------------------------------------------
-def compute_grade(hallazgos: List[Hallazgo]) -> str:
+def compute_grade(hallazgos: list[Hallazgo]) -> str:
     """Calcula la calificación de seguridad global basándose en los hallazgos.
 
     Escala: A+ (sin problemas graves) hasta F (múltiples críticos).
@@ -1371,11 +1371,11 @@ def color_grade(grade: str) -> str:
 # Generador de informe HTML
 # ---------------------------------------------------------------------------
 def generar_html(
-    hallazgos: List[Hallazgo],
+    hallazgos: list[Hallazgo],
     subscription_id: str,
     tenant_id: str,
     grade: str,
-    modulos_ejecutados: List[str],
+    modulos_ejecutados: list[str],
     fecha_inicio: datetime.datetime,
     fecha_fin: datetime.datetime,
 ) -> str:
@@ -1388,7 +1388,7 @@ def generar_html(
     duracion = int((fecha_fin - fecha_inicio).total_seconds())
 
     # Contadores por severidad
-    contadores: Dict[str, int] = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+    contadores: dict[str, int] = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
     for h in hallazgos:
         contadores[h.severidad] = contadores.get(h.severidad, 0) + 1
 
@@ -1433,7 +1433,7 @@ def generar_html(
         filas_html += fila
 
     # Generar sección de resumen por módulo
-    modulos_hallazgos: Dict[str, List[Hallazgo]] = {}
+    modulos_hallazgos: dict[str, list[Hallazgo]] = {}
     for h in hallazgos:
         modulos_hallazgos.setdefault(h.modulo, []).append(h)
 
@@ -1688,7 +1688,7 @@ def mostrar_banner() -> None:
     console.print(Panel(banner, border_style="red", padding=(0, 1)))
 
 
-def mostrar_tabla_hallazgos(hallazgos: List[Hallazgo]) -> None:
+def mostrar_tabla_hallazgos(hallazgos: list[Hallazgo]) -> None:
     """Muestra la tabla de hallazgos en la consola usando Rich."""
     if not hallazgos:
         console.print("\n[bold green]✅ Sin hallazgos detectados — la suscripción supera todas las comprobaciones.[/]\n")
@@ -1726,7 +1726,7 @@ def mostrar_tabla_hallazgos(hallazgos: List[Hallazgo]) -> None:
     console.print()
 
 
-def mostrar_resumen(hallazgos: List[Hallazgo], grade: str, duracion: float) -> None:
+def mostrar_resumen(hallazgos: list[Hallazgo], grade: str, duracion: float) -> None:
     """Muestra el resumen final de la auditoría."""
     crit = sum(1 for h in hallazgos if h.severidad == "CRITICAL")
     high = sum(1 for h in hallazgos if h.severidad == "HIGH")
@@ -1748,7 +1748,7 @@ def mostrar_resumen(hallazgos: List[Hallazgo], grade: str, duracion: float) -> N
 # ---------------------------------------------------------------------------
 # Entrypoint principal
 # ---------------------------------------------------------------------------
-async def ejecutar_auditoria(args: argparse.Namespace) -> List[Hallazgo]:
+async def ejecutar_auditoria(args: argparse.Namespace) -> list[Hallazgo]:
     """Orquesta la ejecución de todos los módulos de auditoría seleccionados."""
 
     tenant = args.tenant_id
@@ -1756,7 +1756,7 @@ async def ejecutar_auditoria(args: argparse.Namespace) -> List[Hallazgo]:
     client_secret = args.client_secret
     subscription_id = args.subscription_id
 
-    todos_hallazgos: List[Hallazgo] = []
+    todos_hallazgos: list[Hallazgo] = []
 
     async with aiohttp.ClientSession() as session:
         console.print("\n[bold cyan]→ Autenticando en Azure...[/]")
@@ -1770,7 +1770,7 @@ async def ejecutar_auditoria(args: argparse.Namespace) -> List[Hallazgo]:
             sys.exit(1)
 
         # Token para Graph API (opcional — requerido por módulos IAM y ENT)
-        token_graph: Optional[str] = None
+        token_graph: str | None = None
         modulo_iam = not args.modulos or "iam" in args.modulos
         modulo_ent = not args.modulos or "ent" in args.modulos
         if modulo_iam or modulo_ent:
@@ -1795,7 +1795,7 @@ async def ejecutar_auditoria(args: argparse.Namespace) -> List[Hallazgo]:
         }
 
         modulos_a_ejecutar = args.modulos if args.modulos else list(modulos_disponibles.keys())
-        modulos_ejecutados: List[str] = []
+        modulos_ejecutados: list[str] = []
 
         for mod_id in modulos_a_ejecutar:
             if mod_id not in modulos_disponibles:
