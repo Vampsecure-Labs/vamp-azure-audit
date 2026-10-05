@@ -1,4 +1,6 @@
 <!-- © VampSecure Studios — VampSecure Labs Security Research Division -->
+
+  <img src="https://github.com/Vampsecure-Labs/vamp-azure-audit/actions/workflows/ci.yml/badge.svg" alt="CI"/>
 # vamp-azure-audit
 
 **Microsoft Azure Security Auditor — VampSecure Labs Security Research Division**
