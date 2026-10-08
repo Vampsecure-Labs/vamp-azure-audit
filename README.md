@@ -224,5 +224,92 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 © VampSecure Studios — VampSecure Labs Security Research Division
 
+## Sample Output
+
+```
+$ vamp-azure-audit
+
+  vamp-azure-audit v1.1  —  Azure Security Auditor
+  VampSecure Labs Security Research Division
+
+  → Autenticando en Azure...
+  ✓ Token Management API obtenido
+  ✓ Token Microsoft Graph obtenido
+  ✓ Subscription: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  (ejemplo-corp)
+
+  → Auditando IAM / Roles...
+  ✗ AZURE-IAM-001 CRITICAL — john.doe@example.com: rol Owner a nivel de suscripción
+  ✗ AZURE-IAM-002 HIGH     — sp-legacy-deploy: Service Principal con rol Owner
+  ✓ Sin usuarios Guest con roles privilegiados
+
+  → Auditando Storage Accounts...
+  ✗ AZURE-STOR-001 HIGH    — storage-public-demo: acceso público a blobs habilitado
+  ✗ AZURE-STOR-002 HIGH    — storage-legacy-logs: tráfico HTTP (sin cifrar) permitido
+  ✓ TLS 1.2 configurado en 3 de 3 Storage Accounts restantes
+
+  → Auditando Network Security Groups...
+  ✗ AZURE-NSG-001 CRITICAL — nsg-dev-open: RDP (3389) expuesto a 0.0.0.0/0
+  ✗ AZURE-NSG-001 CRITICAL — nsg-legacy-mgmt: SSH (22) expuesto a 0.0.0.0/0
+
+  → Auditando Key Vault...
+  ✗ AZURE-KV-001 HIGH      — kv-prod-secrets: Soft Delete no habilitado
+  ✗ AZURE-KV-003 HIGH      — kv-dev-api: accesible desde cualquier red (sin restricciones)
+
+  → Auditando Microsoft Defender for Cloud...
+  ✗ AZURE-DEF-001 HIGH     — Defender for Servers: no activo
+  ✓ Contacto de seguridad configurado
+
+  ╭─ Resumen de Auditoría ────────────────────────────╮
+  │  Calificación global:   D                         │
+  │  🔴 Critical: 3   🟠 High: 7   🟡 Medium: 2      │
+  │  Total hallazgos: 12   Módulos: 7   Duración: 11.4s│
+  ╰───────────────────────────────────────────────────╯
+
+  Exit code: 2  (CRITICAL findings detected)
+```
+
+## Why vamp-azure-audit vs Prowler · ScoutSuite · Microsoft Defender for Cloud
+
+| Feature | vamp-azure-audit | Prowler | ScoutSuite | MS Defender for Cloud |
+|---------|-----------------|---------|------------|----------------------|
+| Direct Azure REST API (no SDK) | ✅ | ⚠️ (Azure SDK) | ⚠️ (Azure SDK) | ❌ (Azure-native) |
+| Portable offline CLI | ✅ | ⚠️ | ⚠️ | ❌ (portal only) |
+| CIS Azure Benchmark aligned | ✅ | ✅ | ✅ | ✅ (subset) |
+| MCSB (Microsoft Cloud Security Benchmark) | ✅ | ⚠️ partial | ⚠️ partial | ✅ |
+| AKS security checks | ✅ | ✅ | ⚠️ | ✅ |
+| Guest user privilege detection via Graph API | ✅ | ⚠️ | ⚠️ | ✅ |
+| VSL client report (HTML/PDF) | ✅ | ⚠️ HTML | ⚠️ HTML | ❌ (portal only) |
+| CI/CD exit codes (0/1/2) | ✅ | ✅ | ⚠️ | ❌ |
+| Works without Azure portal access | ✅ | ✅ | ✅ | ❌ |
+| License | AGPL-3.0 | Apache 2.0 | GPL-2.0 | proprietary |
+
+**Key differentiators:**
+
+- **Raw Azure REST API**: calls `management.azure.com` and `graph.microsoft.com` directly via aiohttp — no Azure SDK, no `az` CLI install required. Minimal dependency footprint suitable for CI container images.
+- **Guest user privilege detection**: queries Microsoft Graph `User.Read.All` to detect external (Guest) accounts holding Owner/Contributor/User Access Administrator roles — a misconfiguration that SDK-only tools relying solely on ARM RBAC often miss.
+- **23 finding types across 7 modules in one pass**: IAM, Storage, AKS, App Services, NSG, Key Vault, and Defender for Cloud audited asynchronously with severity-graded Rich console output.
+- **Portable engagement tool**: a Service Principal with `Reader` + `Microsoft.Security/pricings/read` + `User.Read.All` is the full permission requirement. No Azure portal, no Defender subscription, no additional agents to deploy.
+
+## Check Coverage
+
+| Check ID | Description | Standard | Severity |
+|----------|-------------|----------|----------|
+| AZURE-IAM-001 | User account with Owner or Contributor role at subscription scope | CIS Azure 1.21 / MCSB IM-2 | CRITICAL |
+| AZURE-IAM-002 | Service Principal with Owner role at subscription scope | CIS Azure 1.22 / MCSB IM-2 | HIGH |
+| AZURE-IAM-003 | Guest (external) user with privileged role assignment | CIS Azure 1.3 / MCSB IM-1 | HIGH |
+| AZURE-STOR-001 | Storage Account with public blob access enabled | CIS Azure 3.7 / MCSB DP-1 / NIST SP 800-53 AC-3 | HIGH |
+| AZURE-STOR-002 | Storage Account permitting unencrypted HTTP traffic | CIS Azure 3.1 / MCSB DP-3 | HIGH |
+| AZURE-STOR-003 | Storage Account without network access restrictions configured | CIS Azure 3.8 / NIST SP 800-53 SC-7 | MEDIUM |
+| AZURE-STOR-004 | Minimum TLS version below 1.2 on Storage Account | CIS Azure 3.15 / MCSB NS-8 | MEDIUM |
+| AZURE-AKS-001 | RBAC disabled on AKS cluster | CIS Azure 8.5 / MCSB IM-8 | CRITICAL |
+| AZURE-AKS-002 | AKS API server endpoint publicly accessible | CIS Azure 8.2 / MCSB NS-1 | HIGH |
+| AZURE-AKS-003 | No NetworkPolicy configured on AKS cluster | CIS Azure 8.6 / MCSB NS-2 | HIGH |
+| AZURE-NSG-001 | Critical port (SSH/RDP/WinRM) exposed to `0.0.0.0/0` via NSG rule | CIS Azure 6.1 / MCSB NS-1 | CRITICAL |
+| AZURE-NSG-002 | NSG rule allows all inbound traffic from any source | CIS Azure 6.x / NIST SP 800-53 SC-7 | CRITICAL |
+| AZURE-KV-001 | Key Vault without Soft Delete enabled | CIS Azure 8.4 / MCSB DP-8 | HIGH |
+| AZURE-KV-003 | Key Vault accessible from any network (no firewall restrictions) | CIS Azure 8.7 / MCSB NS-2 | HIGH |
+| AZURE-DEF-001 | Microsoft Defender plan not active for a monitored service tier | CIS Azure 2.x / MCSB LT-1 | HIGH |
+| AZURE-DEF-002 | No security contact email configured in Defender for Cloud | CIS Azure 2.14 / MCSB IR-2 | MEDIUM |
+
 ## Versión
 v1.1 — VampSecure Labs Security Research Division
