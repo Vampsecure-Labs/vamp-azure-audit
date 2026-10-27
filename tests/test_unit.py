@@ -296,3 +296,40 @@ class TestAnalisisRecursosLocales:
         min_tls = app_service_tls_10["properties"]["siteConfig"]["minTlsVersion"]
         versiones_inseguras = {"1.0", "1.1"}
         assert min_tls in versiones_inseguras, f"TLS {min_tls} debe ser inseguro"
+
+
+# ---------------------------------------------------------------------------
+# Informe de cliente VSL (v1.3.0) — el README prometía HTML/PDF sin cablearlo
+# ---------------------------------------------------------------------------
+
+class TestInformeVSL:
+    def _hallazgos(self):
+        from vamp_azure_audit import Hallazgo
+        return [
+            Hallazgo(id="AZ-IAM-01", severidad="CRITICAL", modulo="iam",
+                     recurso="guest@ext.com", descripcion="Guest con rol Owner",
+                     remediacion="Quitar rol", detalle="User Access Admin"),
+            Hallazgo(id="AZ-STO-02", severidad="HIGH", modulo="storage",
+                     recurso="sa-prod", descripcion="Blob público"),
+        ]
+
+    def test_findings_vsl_mapea(self):
+        from vamp_azure_audit import _findings_vsl
+        vsl = _findings_vsl(self._hallazgos())
+        assert {f.id for f in vsl} == {"AZ-IAM-01", "AZ-STO-02"}
+        assert [f for f in vsl if f.id == "AZ-IAM-01"][0].severity == "CRITICAL"
+
+    def test_informe_html(self, tmp_path):
+        import argparse
+        from vamp_azure_audit import _findings_vsl, VERSION
+        from vampsec_report import VampSecReport, meta_from_args
+        rep = VampSecReport(meta=meta_from_args(argparse.Namespace(client="Acme"), "vamp-azure-audit", VERSION),
+                            findings=_findings_vsl(self._hallazgos()))
+        out = tmp_path / "r.html"
+        rep.to_html_client(str(out))
+        html = out.read_text()
+        assert "<html" in html.lower() and "AZ-IAM-01" in html
+
+    def test_version_1_3_0(self):
+        from vamp_azure_audit import VERSION
+        assert VERSION == "1.3.0"

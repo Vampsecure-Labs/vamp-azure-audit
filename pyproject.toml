@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vamp-azure-audit"
-version = "1.1"
+version = "1.3.0"
 description = "Microsoft Azure security auditor for authorized assessments"
 readme = "README.md"
 license = { text = "AGPL-3.0-only" }
@@ -33,4 +33,4 @@ Homepage = "https://github.com/Vampsecure-Labs/vamp-azure-audit"
 Repository = "https://github.com/Vampsecure-Labs/vamp-azure-audit"
 
 [tool.setuptools]
-py-modules = ["vamp_azure_audit"]
+py-modules = ["vamp_azure_audit", "vampsec_report"]

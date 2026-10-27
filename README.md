@@ -166,7 +166,7 @@ vamp-azure-audit --output-html report.html --output-json findings.json
 ```
 $ vamp-azure-audit
 
-  vamp-azure-audit v1.2  —  Azure Security Auditor
+  vamp-azure-audit v1.3.0  —  Azure Security Auditor
   VampSecure Labs Security Research Division
 
   → Authenticating to Azure...
@@ -274,6 +274,7 @@ fi
 
 | Version | Main changes |
 |---------|-------------|
+| v1.3.0 | VSL client engagement report (HTML + PDF) via the shared `vampsec_report` module: `--report-html`/`--report-pdf` + `--client`/`--engagement`/`--auditor`. The comparison table advertised it; the CLI now delivers it (previously only `--output-html`/`--output-json`). |
 | v1.2 | Bilingual README (EN/ES) |
 | v1.1 | Initial public release: 7 modules, 23 findings, direct Azure REST API, no SDK dependency |
 
@@ -441,7 +442,7 @@ vamp-azure-audit --output-html informe.html --output-json hallazgos.json
 ```
 $ vamp-azure-audit
 
-  vamp-azure-audit v1.2  —  Azure Security Auditor
+  vamp-azure-audit v1.3.0  —  Azure Security Auditor
   VampSecure Labs Security Research Division
 
   → Autenticando en Azure...
@@ -553,6 +554,7 @@ AGPL-3.0 License — Copyright © VampSecure Studios — VampSecure Labs Securit
 
 | Versión | Cambios principales |
 |---------|---------------------|
+| v1.3.0 | Informe de cliente VSL (HTML + PDF) vía el módulo compartido `vampsec_report`: `--report-html`/`--report-pdf` + `--client`/`--engagement`/`--auditor`. La tabla comparativa lo anunciaba; ahora la CLI lo entrega (antes solo `--output-html`/`--output-json`). |
 | v1.2 | README bilingüe (EN/ES) |
 | v1.1 | Primera versión pública: 7 módulos, 23 hallazgos, API REST de Azure directa, sin dependencia SDK |
 

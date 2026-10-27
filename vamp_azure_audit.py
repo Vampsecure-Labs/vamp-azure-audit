@@ -28,7 +28,7 @@ from rich.text import Text
 # ---------------------------------------------------------------------------
 # Constantes globales
 # ---------------------------------------------------------------------------
-VERSION = "1.1"
+VERSION = "1.3.0"
 AZURE_MGMT = "https://management.azure.com"
 AZURE_GRAPH = "https://graph.microsoft.com"
 AZURE_LOGIN = "https://login.microsoftonline.com"
@@ -1836,6 +1836,23 @@ async def ejecutar_auditoria(args: argparse.Namespace) -> list[Hallazgo]:
         return todos_hallazgos
 
 
+def _findings_vsl(hallazgos: "list[Hallazgo]") -> list:
+    """Convierte los Hallazgo de azure-audit al formato unificado VSL (vampsec_report)."""
+    from vampsec_report import Finding as VF
+    out: list = []
+    for h in hallazgos:
+        out.append(VF(
+            id=h.id,
+            title=(h.descripcion[:80] if h.descripcion else h.id),
+            severity=h.severidad,
+            description=h.descripcion,
+            evidence=h.detalle or f"Módulo: {h.modulo}",
+            affected=h.recurso or "suscripción Azure",
+            remediation=h.remediacion,
+        ))
+    return out
+
+
 def main() -> None:
     """Punto de entrada del CLI vamp-azure-audit."""
     parser = argparse.ArgumentParser(
@@ -1900,6 +1917,9 @@ def main() -> None:
         action="version",
         version=f"vamp-azure-audit v{VERSION} — VampSecure Labs Security Research Division",
     )
+
+    from vampsec_report import add_report_args
+    add_report_args(parser)
 
     args = parser.parse_args()
 
@@ -2004,6 +2024,20 @@ def main() -> None:
             console.print(f"[green]✓ Hallazgos JSON guardados en: {args.output_json}[/]")
         except OSError as e:
             console.print(f"[red]✗ Error guardando JSON: {e}[/]")
+
+    # Informe de cliente VSL (HTML/PDF con metadatos de engagement)
+    report_html = getattr(args, "report_html", None)
+    report_pdf  = getattr(args, "report_pdf", None)
+    if report_html or report_pdf:
+        from vampsec_report import VampSecReport, meta_from_args
+        rep = VampSecReport(meta=meta_from_args(args, "vamp-azure-audit", VERSION),
+                            findings=_findings_vsl(hallazgos))
+        if report_html:
+            rep.to_html_client(report_html)
+            console.print(f"[green]✓ Informe cliente HTML: {report_html}[/]")
+        if report_pdf:
+            rep.to_pdf(report_pdf)
+            console.print(f"[green]✓ Informe cliente PDF: {report_pdf}[/]")
 
     # Código de salida según severidad
     crit_count = sum(1 for h in hallazgos if h.severidad == "CRITICAL")
